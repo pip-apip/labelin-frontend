@@ -97,6 +97,10 @@
 
     @fluxScripts
 </body>
-<script></script>
+
+    @stack('scripts')
+<script>
+
+</script>
 
 </html>

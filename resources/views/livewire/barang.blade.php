@@ -6,6 +6,7 @@ new class extends Component {
     public $projects = [];
     public $projectSelected = [];
     public $specTechs = [];
+    public $barangItems = [];
     // public $specTechs = [
     //     [
     //         'id' => 1,
@@ -107,42 +108,57 @@ new class extends Component {
         }
     }
 
-    // public function getItems()
-    // {
-    //     try {
-    //         $response = Http::withToken(session('token'))
-    //             ->get(env('API_URL_LN') . '/barang/details/21')
-    //             ->throw();
-    //         $data = $response->json();
-    //         dd('Items fetched successfully: ', $data);
-    //     } catch (\Exception $e) {
-    //         $data = $e->response->json();
-    //         dd($data);
-    //     }
-    // }
-
     public function getSpectech($id)
     {
-        $this->projectSelected = collect($this->projects)->firstWhere('id', $id) ?? null;
-        // dd($this->projectSelected['code']);
-        $params = [
-            'limit' => 1000,
-        ];
+        $this->projectSelected = collect($this->projects)->firstWhere('id', $id);
+        $params = ['limit' => 1000];
 
         if (session('user.project_leader')) {
-            $project_ids = session('user.project_id');
-            $params['project_id'] = is_array($project_ids) ? implode(',', $project_ids) : $project_ids;
+            $projectIds = session('user.project_id');
+            $params['project_id'] = is_array($projectIds) ? implode(',', $projectIds) : $projectIds;
         }
 
+        // Fetch spectech
         try {
-            $response = Http::withToken(session('token'))->get(env('API_URL_PM') . '/activity-categories/search', $params);
+            $response = Http::withToken(session('token'))
+                ->get(env('API_URL_PM') . '/activity-categories/search', $params)
+                ->throw();
 
-            if ($response->json('status') === 200) {
-                $this->specTechs = $response->json('data');
-            }
-        } catch (\Exception $e) {
-            \Log::error('Error fetching spec tech: ' . $e->getMessage());
+            $this->specTechs = $response->json('data') ?? [];
+        } catch (\Throwable $e) {
+            \Log::error('Error fetching spec tech', ['message' => $e->getMessage()]);
+            $this->specTechs = [];
         }
+
+        // Fetch barang items
+        try {
+            $projectId = $this->projectSelected['id'] ?? null;
+
+            $response = Http::withToken(session('token'))
+                ->get(env('API_URL_LN') . '/barang/items', [
+                    'project_id' => $projectId,
+                ])
+                ->throw();
+
+            $this->barangItems = $response->json('data') ?? [];
+        } catch (\Throwable $e) {
+            \Log::error('Error fetching barang items', ['message' => $e->getMessage()]);
+            $this->barangItems = [];
+        }
+        $barangMap = [];
+
+        foreach ($this->barangItems as $barang) {
+            $barangMap[$barang['barang_id']][] = $barang;
+        }
+
+        /**
+         * Map specTechs without foreach
+         */
+        $this->specTechs = array_map(function ($item) use ($barangMap) {
+            $id = $item['id'];
+            $item['children'] = $barangMap[$id] ?? [];
+            return $item;
+        }, $this->specTechs);
     }
 
     public function submit()
@@ -152,13 +168,15 @@ new class extends Component {
             'tracking_number' => $this->tracking_number,
             'received_by' => session('user.name'),
             'received_date' => $this->receivedDate,
+            'project_id' => $this->projectSelected['id'] ?? null,
         ];
 
         try {
-            $response = Http::withToken(session('token'))->post(env('API_URL_LN') . '/barang/items', $body)->throw();
+            $response = Http::withToken(session('token'))
+                ->post(env('API_URL_LN') . '/barang/items', $body)
+                ->throw();
             $data = $response->json();
             dd('Items fetched successfully: ', $data);
-
         } catch (\Exception $e) {
             \Log::error('Data to submit: ' . json_encode($body));
             \Log::error('Error fetching spec tech: ' . $e->getMessage());
@@ -169,20 +187,21 @@ new class extends Component {
 
 <div>
     <div class="grid auto-rows-min gap-4 md:grid-cols-3 mb-6">
-        <div class="relative aspect-video overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">
-            <x-placeholder-pattern class="absolute inset-0 size-full stroke-gray-900/20 dark:stroke-neutral-100/20" />
-        </div>
-        <div class="relative aspect-video overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">
-            <x-placeholder-pattern class="absolute inset-0 size-full stroke-gray-900/20 dark:stroke-neutral-100/20" />
-        </div>
-        <div class="relative aspect-video overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">
-            <x-placeholder-pattern class="absolute inset-0 size-full stroke-gray-900/20 dark:stroke-neutral-100/20" />
-        </div>
+        @for ($i = 0; $i < 3; $i++)
+            <div
+                class="relative aspect-video overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">
+                <x-placeholder-pattern
+                    class="absolute inset-0 size-full stroke-gray-900/20 dark:stroke-neutral-100/20" />
+            </div>
+        @endfor
     </div>
+
+    <!-- Select Paket -->
     <div
         class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl hover:shadow-2xl transition">
-        <div class="flex justify-between text-bottom items-center">
-            <flux:label class="text-lg font-medium text-gray-900 dark:text-gray-300 min-w-[100px]">Pilih Paket
+        <div class="flex justify-between items-center">
+            <flux:label class="text-lg font-medium text-gray-900 dark:text-gray-300 min-w-[100px]">
+                Pilih Paket
             </flux:label>
             <flux:select placeholder="Pilih Paket" class="min-w-[100px]" wire:change="getSpectech($event.target.value)">
                 @foreach ($this->projects as $project)
@@ -192,6 +211,7 @@ new class extends Component {
         </div>
     </div>
 
+    <!-- Loading State -->
     <div class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl mx-auto" wire:loading
         wire:target="getSpectech">
         <div class="flex animate-pulse space-x-4">
@@ -201,20 +221,6 @@ new class extends Component {
                     <div class="h-2 rounded py-1.5 w-1/2 bg-gray-200"></div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div
-        class="{{ $this->projectSelected == null ? 'hidden' : 'relative' }} mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl hover:shadow-2xl transition">
-        <div class="justify-between text-bottom items-center ">
-            <span>
-                <flux:heading size="xl" level="1">
-                    Paket {{ $this->projectSelected['code'] ?? '' }}
-                </flux:heading>
-                <flux:subheading size="lg">
-                    {{ $this->projectSelected['name'] ?? '' }}
-                </flux:subheading>
-            </span>
         </div>
     </div>
 
@@ -242,67 +248,39 @@ new class extends Component {
         </div>
     </div>
 
-    {{-- <div class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl"> --}}
-    <div
-        class="{{ $this->projectSelected == null ? 'hidden' : '' }} relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl">
-        <div>
-            <div class="flex justify-between text-bottom items-center mb-6">
-                <div class="flex gap-4 col-span-2">
-                    <div class="flex justify-between gap-4">
-                        {{-- <flux:label class="text-sm font-medium text-gray-900 dark:text-gray-300">Search</flux:label> --}}
-                        <flux:input type="text" icon="magnifying-glass" placeholder="Search Paket"
-                            wire:model.live.debounce.350ms="searchQuery" class="min-w-[300px]" />
-                    </div>
-                </div>
-                <div class="flex justify-between gap-4">
-                    {{-- <flux:label class="text-sm font-medium text-gray-900 dark:text-gray-300">Sort</flux:label> --}}
+    <!-- Selected Paket Info -->
+    @if ($this->projectSelected)
+        <div
+            class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl hover:shadow-2xl transition">
+            <div>
+                <flux:heading size="xl" level="1">Paket {{ $this->projectSelected['code'] }}</flux:heading>
+                <flux:subheading size="lg">{{ $this->projectSelected['name'] }}</flux:subheading>
+            </div>
+        </div>
+    @endif
+
+    <!-- Paket Table & Controls -->
+    @if ($this->projectSelected)
+        <div class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl">
+            <div class="flex justify-between items-center mb-6 gap-4">
+                <flux:input type="text" icon="magnifying-glass" placeholder="Search Paket"
+                    wire:model.live.debounce.350ms="searchQuery" class="min-w-[300px]" />
+
+                <div class="flex gap-4">
                     <flux:select wire:model.live="filterSort" placeholder="Sort By" class="min-w-[150px]">
                         <flux:select.option value="name">Name</flux:select.option>
-                        {{-- <flux:select.option value="email">Email</flux:select.option>
-                        <flux:select.option value="organization">Organization</flux:select.option> --}}
                     </flux:select>
                     <flux:select wire:model.live="filterOrder" placeholder="Order" class="min-w-[100px]">
                         <flux:select.option value="asc">ASC</flux:select.option>
                         <flux:select.option value="desc">DESC</flux:select.option>
                     </flux:select>
                     <flux:modal.trigger name="add-barang-modal">
-                        <flux:button variant="filled">Add </flux:button>
+                        <flux:button variant="filled">Add</flux:button>
                     </flux:modal.trigger>
-                    {{-- <flux:button variant="filled" wire:click="getItems">Click Me</flux:button> --}}
                 </div>
             </div>
 
-            {{-- <flux:separator />  --}}
-
-            {{-- <div class="overflow-hidden rounded-lg border border-neutral-300">
-                <table class="w-full text-xs shadow-lg">
-                    <thead class="bg-neutral-200">
-                        <tr class="text-left uppercase">
-                            <th class="py-3 px-4">No</th>
-                            <th class="py-3 px-2 min-w-[500px]">Name</th>
-                            <th class="py-3 px-2">Quantity</th>
-                            <th class="py-3 px-4 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-
-                        @foreach ($this->specTechs as $item)
-                            <tr class=" hover:bg-neutral-100 border-b border-neutral-300 ">
-                                <td class="py-3 px-4">{{ $loop->iteration }}</td>
-                                <td class="py-3 px-2">{{ $item['name'] }}</td>
-                                <td class="py-3 px-2">100</td>
-                                <td class="py-3 px-3 text-right">
-                                    <flux:button variant="ghost" size="sm" wire:navigate
-                                        href="{{ route('paket.show') }}">
-                                        Detail
-                                    </flux:button>
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div> --}}
-
+            <!-- Paket Table -->
             <div class="overflow-hidden rounded-lg border border-neutral-300">
                 <table class="w-full text-xs shadow-lg">
                     <thead class="bg-neutral-200">
@@ -315,12 +293,9 @@ new class extends Component {
                     </thead>
                     <tbody>
                         @foreach ($this->specTechs as $item)
-                            {{-- Row utama --}}
                             <tr class="hover:bg-neutral-100 border-b border-neutral-300 font-semibold">
                                 <td class="py-3 px-4">{{ $loop->iteration }}</td>
-                                <td class="py-3 px-2 items-center gap-2">
-                                    <span>{{ $item['name'] }}</span>
-                                </td>
+                                <td class="py-3 px-2">{{ $item['name'] }}</td>
                                 <td class="py-3 px-2">100</td>
                                 <td class="py-3 px-3 text-right">
                                     <flux:button variant="ghost" size="sm" wire:navigate
@@ -330,18 +305,11 @@ new class extends Component {
                                 </td>
                             </tr>
 
-                            {{-- Sub-data (children) --}}
                             @if (!empty($item['children']))
                                 @foreach ($item['children'] as $child)
                                     <tr class="border-b border-neutral-200 bg-neutral-50">
                                         <td class="py-2 px-4"></td>
                                         <td class="py-2 px-6 flex items-center gap-2 text-neutral-700">
-                                            {{-- SVG smooth connector --}}
-                                            {{-- <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-4 text-neutral-400"
-                                                fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                                    d="M4 5v14a1 1 0 001 1h3m0 0l-2-2m2 2l-2 2" />
-                                            </svg> --}}
                                             <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-4 text-neutral-400"
                                                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -349,10 +317,8 @@ new class extends Component {
                                             </svg>
                                             <span>{{ $child['name'] }}</span>
                                         </td>
-                                        <td class="py-2 px-2 text-neutral-500">—</td>
-                                        <td class="py-2 px-3 text-right">
-
-                                        </td>
+                                        <td class="py-2 px-2 text-neutral-500">{{ $child['quantity'] }}</td>
+                                        <td></td>
                                     </tr>
                                 @endforeach
                             @endif
@@ -361,60 +327,46 @@ new class extends Component {
                 </table>
             </div>
         </div>
+    @endif
 
-
-    </div>
-
+    <!-- Add Barang Modal -->
     <flux:modal name="add-barang-modal" class="w-full max-w-4xl">
-        <div class="space-y-6" x-data="barangSelect(@js($jenisBarangData))" x-init="init()">
+        <div class="space-y-6">
             <div>
                 <flux:heading size="lg">Form Barang Diterima</flux:heading>
-                <flux:text class="mt-2">
-                    Tambah informasi barang diterima pada paket {{ $this->projectSelected['code'] ?? '' }}
-                </flux:text>
+                <flux:text class="mt-2"> Tambah informasi barang diterima pada paket
+                    {{ $this->projectSelected['code'] ?? '' }} </flux:text>
             </div>
             <flux:separator></flux:separator>
             <div class="flex justify-between items-center gap-4">
                 <div class="grid grid-cols-4 gap-4 w-full">
-                    <flux:label class="text-sm font-medium text-gray-900 dark:text-gray-300">
-                        Jenis Barang
-                    </flux:label>
+                    <flux:label class="text-sm font-medium text-gray-900 dark:text-gray-300"> Jenis Barang </flux:label>
                     <flux:select wire:model='specTechId' placeholder="Pilih Barang" class="min-w-[100px]">
                         @foreach ($this->specTechs as $item)
                             <flux:select.option value="{{ $item['id'] }}">{{ $item['name'] }}</flux:select.option>
                         @endforeach
                     </flux:select>
-
                     <flux:label>Nama Barang</flux:label>
-                    <div class="relative col-span-1">
-                        <input type="text"
+                    {{-- <div class="relative col-span-1"> <input type="text"
                             class="w-full border rounded-lg block disabled:shadow-none dark:shadow-none appearance-none text-base sm:text-sm py-2 h-10 leading-[1.375rem] ps-3 pe-3 bg-white dark:bg-white/10 dark:disabled:bg-white/[7%] text-zinc-700 disabled:text-zinc-500 placeholder-zinc-400 disabled:placeholder-zinc-400/70 dark:text-zinc-300 dark:disabled:text-zinc-400 dark:placeholder-zinc-400 dark:disabled:placeholder-zinc-500 shadow-xs border-zinc-200 border-b-zinc-300/80 disabled:border-b-zinc-200 dark:border-white/10 dark:disabled:border-white/5"
                             placeholder="Ketik nama barang..." x-model="search" wire:model.lazy="jenisName"
                             @input="filterList" @keydown.arrow-down.prevent="moveDown"
                             @keydown.arrow-up.prevent="moveUp" @keydown.enter.prevent="selectItem" />
-
-                        {{-- Dropdown Suggestion --}}
                         <div x-show="filtered.length > 0"
                             class="absolute bg-white border w-full mt-1 z-10 max-h-40 overflow-y-auto rounded shadow text-base sm:text-sm">
                             <template x-for="(item, index) in filtered" :key="item.name">
                                 <div class="px-2 py-1 cursor-pointer"
                                     :class="index === highlightedIndex ? 'bg-gray-200' : ''"
-                                    @mouseenter="highlightedIndex = index" @click="choose(item)">
-                                    <span x-text="item.name"></span>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
+                                    @mouseenter="highlightedIndex = index" @click="choose(item)"> <span
+                                        x-text="item.name"></span> </div>
+                            </template> </div>
+                    </div> --}}
 
                     {{-- Quantity --}}
                     <flux:label>Quantity</flux:label>
-                    <flux:input wire:model="quantity" placeholder="Quantity" />
-
-                    {{-- Diterima Ke --}}
-                    <flux:label>Diterima Ke</flux:label>
-                    <flux:input wire:model="diterimaKe" placeholder="Lokasi/Tempat" />
-
-                    {{-- Quantity Total --}}
+                    <flux:input wire:model="quantity" placeholder="Quantity" /> {{-- Diterima Ke --}} <flux:label>
+                        Diterima Ke</flux:label>
+                    <flux:input wire:model="diterimaKe" placeholder="Lokasi/Tempat" /> {{-- Quantity Total --}}
                     <flux:label>Quantity Total</flux:label>
                     <flux:input wire:model="quantityTotal" placeholder="Total"
                         :disabled="collect($jenisBarangData)->pluck('name')->contains($jenisName)" />
@@ -423,7 +375,6 @@ new class extends Component {
                     <flux:button wire:click="addBarang" variant="primary">Add</flux:button>
                 </div>
             </div>
-
             <table class="w-full text-sm shadow-lg mt-4">
                 <thead class="bg-zinc-200 dark:bg-zinc-900 border-b border-zinc-800">
                     <tr class="text-left border-b border-zinc-800 uppercase">
@@ -450,25 +401,18 @@ new class extends Component {
                                     <flux:icon name="x-circle" />
                                 </flux:button>
                             </td>
-                        </tr>
-                    @empty
-                        <tr>
+                    </tr> @empty <tr>
                             <td colspan="5" class="text-center py-4 text-gray-500">Belum ada data</td>
                         </tr>
                     @endforelse
                 </tbody>
             </table>
-
-            <div class="flex justify-between items-center w-full gap-4">
-                {{-- Tanggal Diterima --}}
-                <flux:label>Tanggal Diterima</flux:label>
-                <flux:input type="date" wire:model="receivedDate" class="min-w-[150px]" />
-
-                {{-- Nomor Resi --}}
+            <div class="flex justify-between items-center w-full gap-4"> {{-- Tanggal Diterima --}} <flux:label>Tanggal
+                    Diterima</flux:label>
+                <flux:input type="date" wire:model="receivedDate" class="min-w-[150px]" /> {{-- Nomor Resi --}}
                 <flux:label>Nomor Resi</flux:label>
                 <flux:input wire:model="tracking_number" placeholder="Nomor Resi" />
             </div>
-
             <flux:separator></flux:separator>
             <div class="flex justify-end gap-4">
                 <flux:button variant="primary" wire:click="submit">Simpan</flux:button>
@@ -476,6 +420,7 @@ new class extends Component {
         </div>
     </flux:modal>
 
+    <!-- Alpine.js -->
     <script>
         function barangSelect(items) {
             return {
@@ -483,53 +428,29 @@ new class extends Component {
                 search: '',
                 filtered: [],
                 highlightedIndex: -1,
-
                 init() {
                     this.filtered = [];
                 },
-
                 filterList() {
                     const keyword = this.search.toLowerCase().trim();
-                    if (!keyword) {
-                        this.filtered = [];
-                        this.highlightedIndex = -1;
-                        return;
-                    }
-
-                    this.filtered = this.all.filter(i =>
-                        i.name.toLowerCase().includes(keyword)
-                    );
+                    this.filtered = keyword ? this.all.filter(i => i.name.toLowerCase().includes(keyword)) : [];
                     this.highlightedIndex = this.filtered.length ? 0 : -1;
                 },
-
                 moveDown() {
-                    if (!this.filtered.length) return;
-                    if (this.highlightedIndex < this.filtered.length - 1) {
-                        this.highlightedIndex++;
-                    } else {
-                        this.highlightedIndex = 0;
-                    }
+                    this.highlightedIndex = (this.highlightedIndex + 1) % this.filtered.length;
                 },
-
                 moveUp() {
-                    if (!this.filtered.length) return;
-                    if (this.highlightedIndex > 0) {
-                        this.highlightedIndex--;
-                    } else {
-                        this.highlightedIndex = this.filtered.length - 1;
-                    }
+                    this.highlightedIndex = (this.highlightedIndex - 1 + this.filtered.length) % this.filtered.length;
                 },
-
                 selectItem() {
-                    if (this.filtered.length && this.highlightedIndex >= 0) {
-                        this.choose(this.filtered[this.highlightedIndex]);
-                    } else {
+                    if (this.filtered.length && this.highlightedIndex >= 0) this.choose(this.filtered[this
+                        .highlightedIndex]);
+                    else {
                         this.$wire.set('jenisName', this.search);
                         this.filtered = [];
                         this.highlightedIndex = -1;
                     }
                 },
-
                 choose(item) {
                     this.search = item.name;
                     this.$wire.set('jenisName', item.name);
@@ -541,3 +462,17 @@ new class extends Component {
     </script>
 
 </div>
+
+@push('scripts')
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"
+        integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('.js-example-basic-single').select2({
+                tags: true,
+            });
+        });
+    </script>
+@endpush
