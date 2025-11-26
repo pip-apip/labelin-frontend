@@ -55,20 +55,6 @@ new #[Layout('components.layouts.auth')] class extends Component {
             'token' => $response->json('data.refresh_token'),
         ]);
 
-        $responsePL = Http::withToken($response->json('data.access_token'))->get(env('API_URL_PM') . '/projects/search?project_leader_id=' . $response->json('data.id') . '&limit=1000');
-
-        if ($responsePL->json('data')) {
-            $projects = $responsePL->json('data');
-            $projectIds = [];
-            foreach ($projects as $project) {
-                $projectIds[] = $project['id'];
-            }
-            session(['user.project_leader' => true]);
-            session(['user.project_id' => $projectIds]);
-        } else {
-            session(['user.project_leader' => false]);
-            session(['user.project_id' => []]);
-        }
         Session::regenerate();
 
         $this->redirectIntended(default: route('paket', absolute: false), navigate: true);
