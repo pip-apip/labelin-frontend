@@ -11,26 +11,33 @@ new class extends Component {
     public $barangItems = [];
     public $itemToAdd = [];
 
-    // Form input
+    // Form input add item
     public $specTechId = '';
     public $jenisName = '';
-    public $quantityUnit = '';
     public $quantity = null;
-    public $diterimaKe = 'gudang';
+
+    // Form Input Add barangReceived
+    public $quantityUnit = '';
+    public $current_location = 'gudang';
     public $receivedDate = '';
     public $tracking_number = '';
     public $showConfirmModal = false;
-    public $lokasi = '';
+    public $notes = '';
 
     // Array hasil Add
     public $barangDiterima = [];
+
+    // selected child for income modal
+    public $selectedChildId = null;
+    public $selectedChildName = null;
 
     public function mount()
     {
         $this->projectSelected = [];
         $this->receivedDate = now()->format('Y-m-d');
         $this->getProjects();
-
+        $this->getSpectech(50);
+        $this->dispatch('refreshSelect2');
     }
 
     public function rules()
@@ -42,7 +49,8 @@ new class extends Component {
         ];
     }
 
-    public function messages(){
+    public function messages()
+    {
         return [
             'jenisName.required' => 'Nama barang harus diisi.',
             'specTechId.required' => 'Jenis barang harus dipilih.',
@@ -53,8 +61,13 @@ new class extends Component {
         ];
     }
 
-    public function addItem(){
-        $this->validate();
+    public function addItem()
+    {
+        $this->validate([
+            'jenisName' => 'required',
+            'specTechId' => 'required',
+            'quantity' => 'required|integer|min:1',
+        ]);
 
         $this->itemToAdd[] = [
             'barang_id' => $this->specTechId,
@@ -62,7 +75,6 @@ new class extends Component {
             'description' => null,
             'quantity' => $this->quantity,
         ];
-
 
         $this->reset(['specTechId', 'jenisName', 'quantity']);
     }
@@ -91,7 +103,6 @@ new class extends Component {
             if ($response->json('status') === 200) {
                 $this->projects = $response->json('data');
             }
-
         } catch (\Exception $e) {
             \Log::error('Error fetching projects: ' . $e->getMessage());
         }
@@ -104,7 +115,7 @@ new class extends Component {
         // Fetch spectech
         try {
             $response = Http::withToken(session('token'))
-                ->get(env('API_URL_PM') . '/activity-categories/search?project_id=' . $id . '&limit=100', )
+                ->get(env('API_URL_PM') . '/activity-categories/search?project_id=' . $id . '&limit=100')
                 ->throw();
 
             $this->specTechs = $response->json('data') ?? [];
@@ -145,8 +156,7 @@ new class extends Component {
 
     public function saveItems()
     {
-
-        if($this->itemToAdd == []){
+        if ($this->itemToAdd == []) {
             Toaster::error('Tidak ada item untuk disimpan.');
             return;
         }
@@ -162,11 +172,45 @@ new class extends Component {
             Toaster::success($data['message'] ?? 'Items berhasil ditambahkan.');
             $this->getSpectech($this->projectSelected['id'] ?? null);
             $this->reset(['itemToAdd']);
-
         } catch (\Exception $e) {
             $json = $e->response->json();
             Toaster::error($json['message'] ?? 'Gagal menambahkan items.');
             \Log::error('Error fetching spec tech: ' . $e->getMessage());
+        }
+    }
+
+    public function barangReceived()
+    {
+        $this->validate([
+            'current_location' => 'required',
+            'receivedDate' => 'required|date',
+            'tracking_number' => 'nullable|string',
+            'quantityUnit' => 'required|integer|min:1',
+        ]);
+        try {
+            $response = Http::withToken(session('token'))
+                ->post(env('API_URL_LN') . '/barang/details', [
+                    'barang_item_id' => $this->selectedChildId ?? null,
+                    'current_location' => $this->current_location,
+                    'tracking_number' => $this->tracking_number,
+                    'status' => $this->current_location == 'gudang' ? 'ready' : 'at_vendor',
+                    'notes' => $this->notes,
+                    'goals' => null,
+                    'quantity_unit' => $this->quantityUnit,
+                    'received_by' => session('user.name'),
+                    'received_at' => $this->receivedDate,
+                    'shipment_id' => null,
+                ])
+                ->throw();
+            $data = $response->json();
+
+            Toaster::success($data['message'] ?? 'Items berhasil ditambahkan.');
+            $this->reset(['quantityUnit', 'current_location', 'tracking_number', 'notes']);
+            Flux::modal('barang-income')->close();
+        } catch (\Exception $e) {
+            $json = $e->response->json();
+            Toaster::error($json['message']);
+            \Log::error($json);
         }
     }
 
@@ -181,11 +225,35 @@ new class extends Component {
 
             Toaster::success($data['message'] ?? 'Item berhasil dihapus.');
             $this->getSpectech($this->projectSelected['id'] ?? null);
+            $this->reset(['selectedChildId', 'selectedChildName']);
+            Flux::modal('delete-item')->close();
         } catch (\Exception $e) {
             \Log::error('Error deleting item: ' . $e->response->json('message') ?? 'Unknown error');
         }
     }
+
+    public function openIncomeModal($id, $name)
+    {
+        foreach ($this->specTechs as $item) {
+            foreach ($item['children'] as $child) {
+                if ($child['id'] == $id) {
+                    $this->selectedChildId = $child['id'];
+                    $this->selectedChildName = $child['name'];
+
+                     if($name === 'delete'){
+                        Flux::modal('delete-item')->show();
+                        return;
+                    }else {
+                        Flux::modal('barang-income')->show();
+                        return;
+                    }
+                }
+            }
+        }
+
+    }
 }; ?>
+
 
 <div>
     <div>
@@ -202,10 +270,9 @@ new class extends Component {
             <flux:label class="text-lg font-medium text-gray-900 dark:text-gray-300 min-w-[100px]">
                 Pilih Paket
             </flux:label>
-            <select id="select2" placeholder="Pilih Paket" class="w-full form-control" wire:change="getSpectech($event.target.value)">
+            <select wire:key='select2-project' id="select2" placeholder="Pilih Paket" class="w-full form-control" wire:change="getSpectech($event.target.value)">
                 <option value="">-- Select Project --</option>
                 @foreach ($this->projects as $project)
-
                 <option value="{{ $project['id'] }}">{{ $project['name'] }}</option>
                 @endforeach
             </select>
@@ -252,7 +319,8 @@ new class extends Component {
     @if ($this->projectSelected)
     <div wire:loading.remove wire:target="getSpectech" class="relative mb-6 w-full border border-zinc-100 p-6 rounded-lg bg-zinc-50 shadow-2xl hover:shadow-2xl transition">
         <div>
-            <flux:heading size="xl" level="1">{{ $this->projectSelected['name'] }} ({{ $this->projectSelected['code'] }})</flux:heading>
+            <flux:heading size="xl" level="1">{{ $this->projectSelected['name'] }}
+                ({{ $this->projectSelected['code'] }})</flux:heading>
             <flux:subheading size="lg">{{ $this->projectSelected['company_name'] }}</flux:subheading>
         </div>
     </div>
@@ -314,8 +382,13 @@ new class extends Component {
                         </td>
                         <td class="py-2 px-2 text-neutral-500">{{ $child['quantity'] }}</td>
                         <td class="text-right px-3 py-3">
-                            <flux:button icon="x-mark" size="sm" variant="ghost" wire:click="destroyItem({{ $child['id'] }})"></flux:button>
-                            <flux:button icon="inbox-arrow-down" size="sm" variant="ghost"></flux:button>
+                            <flux:modal.trigger name="delete-item">
+                                <flux:button icon="x-mark" size="sm" variant="ghost" wire:click="openIncomeModal({{ $child['id'] }}, 'delete')"></flux:button>
+                            </flux:modal.trigger>
+                            <flux:modal.trigger name="barang-income">
+                                <flux:button icon="inbox-arrow-down" size="sm" variant="ghost" wire:click="openIncomeModal({{ $child['id']}}, 'income')">
+                                </flux:button>
+                            </flux:modal.trigger>
                         </td>
                     </tr>
                     @endforeach
@@ -327,6 +400,7 @@ new class extends Component {
     </div>
     @endif
 
+    <!-- Modal Add Barang -->
     <flux:modal name="add-barang-modal" class="w-full max-w-4xl" wire:model="showConfirmModal">
         <div class="space-y-6">
             <div>
@@ -340,7 +414,8 @@ new class extends Component {
                 <flux:field class="w-full">
                     <flux:select placeholder="Pilih Jenis Barang" wire:model="specTechId" class="min-w-[100px]">
                         @foreach ($this->specTechs as $item)
-                        <flux:select.option value="{{ $item['id'] }}">{{ $item['name'] }}</flux:select.option>
+                        <flux:select.option value="{{ $item['id'] }}">{{ $item['name'] }}
+                        </flux:select.option>
                         @endforeach
                     </flux:select>
                     <flux:error name="specTechId" class="text-xs" />
@@ -420,6 +495,55 @@ new class extends Component {
                 </flux:button>
             </div>
     </flux:modal>
+
+    <!-- Modal Barang Masuk -->
+    <flux:modal name="barang-income" class="space-y-6 max-w-5xl">
+        <div>
+            <flux:heading size="lg">Barang Masuk - {{ $selectedChildName }}</flux:heading>
+            <flux:text class="mt-2"> Isi form berikut untuk menambahkan data barang masuk ke dalam sistem.
+            </flux:text>
+        </div>
+        <div class="flex gap-4">
+            <div class="w-24">
+                <flux:input class="field-sizing-content" wire:model='quantityUnit' placeholder="Quantity" type="number" />
+            </div>
+
+            <div class="w-40">
+                <flux:input type="date" wire:model='receivedDate' placeholder="Tanggal" />
+            </div>
+
+            <div id="lokasi-container" class="w-40" wire:ignore>
+                <select id="lokasi" wire:key="select2-lokasi" wire:model="current_location" class="w-full">
+                    <option value="gudang">Gudang</option>
+                </select>
+            </div>
+
+            <div class="flex-1">
+                <flux:input type="textarea" wire:model='notes' placeholder="Notes" />
+            </div>
+
+            <flux:button variant="primary" wire:click="barangReceived">Simpan</flux:button>
+        </div>
+    </flux:modal>
+    <flux:modal name="delete-item" class="min-w-[22rem]">
+        <div class="space-y-6">
+            <div>
+                <flux:heading size="lg">Delete Item</flux:heading>
+                <flux:text class="mt-2">
+                    You're about to delete this {{ $selectedChildName }}.<br>
+                    This action cannot be reversed.
+                </flux:text>
+            </div>
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">Cancel</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="danger" wire:loading.attr="disabled" wire:click="destroyItem({{ $this->selectedChildId }})">Delete Item</flux:button>
+            </div>
+        </div>
+    </flux:modal>
+
 </div>
 
 <!-- Alpine.js -->
@@ -462,6 +586,48 @@ new class extends Component {
         , }
     }
 
+    function forceDestroy(id) {
+        const el = $(id);
+
+        try {
+            if (el.data('select2')) {
+                el.select2('destroy');
+            }
+        } catch (e) {}
+
+        // Hapus wrapper select2 yang tertinggal (ini penyebab duplicate)
+        el.siblings('.select2').remove();
+    }
+
+    function initSelect2() {
+
+        forceDestroy('#select2');
+
+        $('#select2').select2({
+            width: '100%'
+        });
+
+        $('#select2').on('change', function() {
+            const id = document.querySelector('[wire\\:id]')?.getAttribute('wire:id');
+            if (!id) return; // aman fallback
+
+            Livewire.find(id)?.call('getSpectech', $(this).val());
+        });
+    }
+
+    function initSelect2Lokasi() {
+        forceDestroy('#lokasi');
+        let parent = $('#lokasi-container');
+        $('#lokasi').select2({
+            tags: true
+            , dropdownParent: parent
+        }).on('change', function() {
+            const id = document.querySelector('[wire\\:id]')?.getAttribute('wire:id');
+            if (!id) return; // aman fallback
+            Livewire.find(id).set('current_location', $(this).val());
+        });
+    }
+
 </script>
 
 <style>
@@ -476,6 +642,12 @@ new class extends Component {
         display: flex !important;
         align-items: center !important;
         background-color: #fff !important;
+        z-index: 999999;
+
+    }
+
+    .select2-container {
+        width: 100% !important;
     }
 
     /* Arrow */
@@ -490,6 +662,7 @@ new class extends Component {
         /* rounded-xl */
         border: 1px solid #e5e7eb !important;
         overflow: hidden;
+        z-index: 999999;
     }
 
     /* Search input dalam dropdown */
@@ -507,33 +680,12 @@ new class extends Component {
         /* gray-900 */
     }
 
+    dialog[data-modal="barang-income"] {
+        overflow: visible !important;
+    }
+
+    dialog[data-modal="barang-income"]::backdrop {
+        overflow: hidden !important;
+    }
+
 </style>
-
-@push('scripts')
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-
-        function initSelect2() {
-            $('#select2').select2({
-                width: '100%'
-            });
-
-            // when changed -> notify Livewire
-            $('#select2').on('change', function(e) {
-                @this.call('getSpectech', $(this).val());
-            });
-        }
-
-        initSelect2();
-
-        Livewire.hook('message.processed', () => {
-            initSelect2();
-        });
-
-    });
-
-</script>
-
-@endpush

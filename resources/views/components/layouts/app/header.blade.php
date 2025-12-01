@@ -15,13 +15,12 @@
         </a>
 
         <flux:navbar class="-mb-px max-lg:hidden">
-            <flux:navbar.item icon="layout-grid" href="{{ route('paket') }}"
-                :current="request()->routeIs('paket') || request()->routeIs('paket.show')" wire:navigate>
+            <flux:navbar.item icon="layout-grid" href="{{ route('paket') }}" :current="request()->routeIs('paket') || request()->routeIs('paket.show')" wire:navigate>
                 Dashboard
             </flux:navbar.item>
             {{-- <flux:navbar.item icon="layout-grid" href="{{ route('barang-masuk') }}"
-                :current="request()->routeIs('barang-masuk')" wire:navigate>
-                Barang Masuk
+            :current="request()->routeIs('barang-masuk')" wire:navigate>
+            Barang Masuk
             </flux:navbar.item> --}}
         </flux:navbar>
 
@@ -36,8 +35,7 @@
                     <div class="p-0 text-sm font-normal">
                         <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                             <span class="relative flex h-8 w-8 shrink-0 overflow-hidden rounded-lg">
-                                <span
-                                    class="flex h-full w-full items-center justify-center rounded-lg bg-neutral-200 text-black dark:bg-neutral-700 dark:text-white">
+                                <span class="flex h-full w-full items-center justify-center rounded-lg bg-neutral-200 text-black dark:bg-neutral-700 dark:text-white">
                                     {{ session('user.name') }}
                                 </span>
                             </span>
@@ -69,8 +67,7 @@
     </flux:header>
 
     <!-- Mobile Menu -->
-    <flux:sidebar stashable sticky
-        class="lg:hidden border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
+    <flux:sidebar stashable sticky class="lg:hidden border-r border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
         <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
         <a href="{{ route('paket') }}" class="ml-1 flex items-center space-x-2" wire:navigate>
@@ -79,13 +76,12 @@
 
         <flux:navlist variant="outline">
             <flux:navlist.group heading="Platform">
-                <flux:navlist.item icon="layout-grid" href="{{ route('paket') }}"
-                    :current="request()->routeIs('paket') || request()->routeIs('paket.show')" wire:navigate>
+                <flux:navlist.item icon="layout-grid" href="{{ route('paket') }}" :current="request()->routeIs('paket') || request()->routeIs('paket.show')" wire:navigate>
                     Dashboard
                 </flux:navlist.item>
                 {{-- <flux:navlist.item icon="layout-grid" href="{{ route('barang-masuk') }}"
-                    :current="request()->routeIs('paket')" wire:navigate>
-                    Barang Masuk
+                :current="request()->routeIs('paket')" wire:navigate>
+                Barang Masuk
                 </flux:navlist.item> --}}
             </flux:navlist.group>
         </flux:navlist>
@@ -99,8 +95,19 @@
     @fluxScripts
 </body>
 
-    @stack('scripts')
+@stack('scripts')
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
+
+
+    document.addEventListener('livewire:navigated', function(e) {
+        // solusi utama
+        setTimeout(() => {
+            initSelect2Lokasi();
+            initSelect2();
+        }, 100);
+    });
 
 </script>
 
