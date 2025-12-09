@@ -20,6 +20,7 @@ Route::middleware(['api.auth'])->group(function () {
 
     Volt::route('paket', 'barang')->name('paket');
     Volt::route('paket/show/{id}', 'paket.barangDetail')->name('paket.show');
+    Volt::route('paket/show2/{id}', 'paket.barangDetail2')->name('paket.show.2');
     Volt::route('barang-masuk', 'barangMasuk')->name('barang-masuk');
 });
 

@@ -414,7 +414,7 @@ new class extends Component {
                         <td class="py-3 px-2">{{ $item['name'] }}</td>
                         <td class="py-3 px-2">{{ count($item['children']) }} Items</td>
                         <td class="py-3 px-3 text-right">
-                            <flux:button variant="ghost" size="sm" wire:navigate href="{{ route('paket.show', ['id' => $item['id'], 'nama' => $item['name']]) }}">
+                            <flux:button variant="ghost" size="sm" wire:navigate href="{{ route('paket.show.2', $item['id']) }}">
                                 Detail
                             </flux:button>
                         </td>

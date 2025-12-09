@@ -35,6 +35,7 @@ new class extends Component {
                 ->throw();
             $this->dataItems = $response->json()['data'];
         } catch (\Exception $e) {
+            \Log::info($e);
             \Log::info('Response: ', $e->response->json());
             \Log::error('Error fetching item details: ' . $e->getMessage());
         }
